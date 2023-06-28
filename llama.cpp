@@ -2662,6 +2662,7 @@ struct llama_model * llama_load_model_from_file(
                              const char * path_model,
             struct llama_context_params   params) {
     ggml_time_init();
+    ggml_init_aux();
 
     llama_model * model = new llama_model;
 

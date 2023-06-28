@@ -4210,6 +4210,12 @@ static inline int ggml_up(int n, int m) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+void ggml_init_aux(void) {
+#if defined(GGML_USE_CLBLAST)
+    ggml_cl_init();
+#endif
+}
+
 struct ggml_context * ggml_init(struct ggml_init_params params) {
     // make this function thread safe
     ggml_critical_section_start();

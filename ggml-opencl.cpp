@@ -892,6 +892,7 @@ static cl_kernel dequantize_block_q2_k_cl, dequantize_block_q3_k_cl, dequantize_
 static cl_kernel dequantize_mul_mat_vec_q2_K_cl, dequantize_mul_mat_vec_q3_K_cl, dequantize_mul_mat_vec_q4_K_cl, dequantize_mul_mat_vec_q5_K_cl, dequantize_mul_mat_vec_q6_K_cl;
 static cl_kernel mul_f32_cl;
 static bool fp16_support;
+static bool is_init = false;
 
 static cl_program build_program_from_source(cl_context ctx, cl_device_id dev, const char* program_buffer) {
     cl_program p;
@@ -928,6 +929,7 @@ static cl_program build_program_from_source(cl_context ctx, cl_device_id dev, co
 }
 
 void ggml_cl_init(void) {
+    if(is_init){return;}
     cl_int err;
 
     struct cl_device;
@@ -1147,6 +1149,7 @@ void ggml_cl_init(void) {
 
     // mul kernel
     CL_CHECK((mul_f32_cl = clCreateKernel(program, "mul_f32", &err), err));
+    is_init = true;
 }
 
 static cl_kernel* ggml_get_to_fp32_cl(ggml_type type) {
@@ -1340,6 +1343,45 @@ void ggml_cl_free_data(const struct ggml_tensor* tensor) {
 
     cl_mem mem = (cl_mem)tensor->data;
     clReleaseMemObject(mem);
+}
+
+static std::unordered_map<const void*, cl_mem> cl_mem_map;
+
+void* ggml_cl_host_malloc(size_t size) {
+    if (getenv("GGML_CL_NO_PINNED") != nullptr) {
+        return nullptr;
+    }
+
+    cl_int err1;
+    cl_int err2;
+    void* ptr = nullptr;
+    cl_mem cl_mem_obj = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, size, NULL, &err1);
+    ptr = (uint8_t*) clEnqueueMapBuffer(queue, cl_mem_obj, CL_TRUE, CL_MAP_WRITE, 0, size, 0, NULL, NULL, &err2);
+    CL_CHECK(clFinish(queue));
+    if ((err1 | err2) != CL_SUCCESS) {
+        fprintf(stderr, "WARNING: failed to allocate %.2f MB of pinned memory: %d %d\n",
+            size/1024.0/1024.0, err1, err2);
+        return nullptr;
+    }
+
+    cl_mem_map.insert({ptr, cl_mem_obj});
+
+    return ptr;
+}
+
+void ggml_cl_host_free(void* ptr) {
+    if (cl_mem_map.find(ptr) != cl_mem_map.end()) {
+        fprintf(stderr, "WARNING: to free pinned memory: memory not in map\n");
+        return;
+    }
+
+    cl_mem& cl_mem_obj = cl_mem_map[ptr];
+
+    CL_CHECK(clEnqueueUnmapMemObject(queue, cl_mem_obj, ptr, 0, NULL, NULL));
+    CL_CHECK(clFinish(queue));
+    CL_CHECK(clReleaseMemObject(cl_mem_obj));
+
+    cl_mem_map.erase(cl_mem_map.find(ptr));
 }
 
 static cl_int ggml_cl_h2d_tensor_2d(cl_command_queue queue, cl_mem dst, size_t offset, const struct ggml_tensor * src, uint64_t i3, uint64_t i2, cl_event* ev) {

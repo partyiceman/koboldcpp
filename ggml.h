@@ -502,6 +502,7 @@ extern "C" {
     GGML_API size_t ggml_tensor_overhead(void);
 
     // main
+    GGML_API void ggml_init_aux(void);
 
     GGML_API struct ggml_context * ggml_init(struct ggml_init_params params);
     GGML_API void                  ggml_free(struct ggml_context * ctx);
